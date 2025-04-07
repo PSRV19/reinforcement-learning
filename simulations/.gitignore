@@ -1,0 +1,19 @@
+# Ignore Python cache folders
+__pycache__/
+**/__pycache__/
+
+# Ignore Python bytecode files
+*.py[cod]
+
+# Ignore virtual environments
+venv/
+.env/
+
+# Ignore other common files
+*.log
+*.sqlite3
+*.db
+
+# Ignore system files
+.DS_Store
+Thumbs.db
