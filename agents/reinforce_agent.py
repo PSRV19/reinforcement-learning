@@ -3,9 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from config import reinforce_config 
 
-# Defin the policy network
+# Define the policy network
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super(PolicyNetwork, self).__init__()

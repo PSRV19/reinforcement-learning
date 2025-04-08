@@ -57,9 +57,9 @@ for run in run_progress:
     # Create the REINFORCE Agent
     agent = ReinforceAgent(
         env = env,
-        state_size=4,
+        state_size=4, # CartPole only has 4 states: cart position, cart velocity, pole angle, pole angular velocity
         hidden_size=hidden_size,  
-        action_size=2, 
+        action_size=2, # In CartPole you can only move left or right
         learning_rate=learning_rate, 
         discount_factor=discount_factor,
         device = device
@@ -109,7 +109,7 @@ for run in run_progress:
             
         # Compute the returns
         returns = agent.compute_returns(rewards)
-        ep_return = sum(returns)  # Sum all returns for the episode
+        ep_return = sum(rewards)  # Sum all rewards for the episode
         
         # Store episode return and length
         run_results["episode_returns"].append(ep_return)
