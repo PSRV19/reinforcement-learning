@@ -3,13 +3,17 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.ndimage import uniform_filter1d
 import argparse
 
 # Set the style for better visualization
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 12
+
+def moving_average(data, window_size):
+    """Compute the moving average using a sliding window."""
+    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+
 
 def plot_learning_curves(results_path, window_size=50):
     """
@@ -34,25 +38,30 @@ def plot_learning_curves(results_path, window_size=50):
     # Plot each run with moving average
     all_returns = []
     
+    # Create color palette for runs
+    colors = sns.color_palette("husl", num_runs)
+    
     for i, run in enumerate(runs):
         returns = run['episode_returns']
-        # Apply moving average
-        smoothed_returns = uniform_filter1d(returns, size=window_size)
-        all_returns.append(returns)
-        ax.plot(range(1, num_episodes + 1), smoothed_returns, 
-                alpha=0.3, label=f'Run {i+1}')
+        # Apply moving average to raw returns
+        smoothed_returns = moving_average(returns, window_size)
+        all_returns.append(smoothed_returns)
+        ax.plot(range(window_size, num_episodes + 1), smoothed_returns, 
+                alpha=0.3, color=colors[i], label=f'Run {i+1}')
     
     # Calculate and plot the average with moving average
     all_returns = np.array(all_returns)
     avg_returns = np.mean(all_returns, axis=0)
-    smoothed_avg = uniform_filter1d(avg_returns, size=window_size)
-    ax.plot(range(1, num_episodes + 1), smoothed_avg, 
+    ax.plot(range(window_size, num_episodes + 1), avg_returns, 
             linewidth=3, color='black', label='Average')
+    
+    # Get algorithm name from file name
+    algo_name = os.path.splitext(os.path.basename(results_path))[0].replace('_results', '').upper()
     
     # Add labels and title
     ax.set_xlabel('Episode')
     ax.set_ylabel(f'Return ({window_size}-episode moving average)')
-    ax.set_title('Learning Curves')
+    ax.set_title(f'{algo_name} Learning Curves')
     
     # Add legend
     ax.legend()
@@ -63,7 +72,7 @@ def plot_learning_curves(results_path, window_size=50):
     
     # Save the plot
     plot_name = os.path.splitext(os.path.basename(results_path))[0] + '_learning_curves.png'
-    plt.savefig(os.path.join(plots_dir, plot_name))
+    plt.savefig(os.path.join(plots_dir, plot_name), dpi=300, bbox_inches='tight')
     plt.close()
     
     print(f"Plot saved to: {os.path.join(plots_dir, plot_name)}")
