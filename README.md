@@ -8,7 +8,7 @@ In this repo we have the following agents:
 
 ## How to run simulations
 
-Simply run the following command
+Ensure that you are in the `\reinforcement-learning` (root) directory. Simply run the following command:
 
 ``` python
 python simulations/{agent_name}_sim.py
@@ -16,18 +16,13 @@ python simulations/{agent_name}_sim.py
 
 file for the desired agent and the results will be saved in `\results\` directory.
 
-Running the `plot.py` file in the utils directory creates a `results\plots\` directory (if it doesn't exist yet) under the `\results\` directory, and creates a `{agent_name}_learning_curve.png` file with a plot of returns over episodes.
+Running the `plot.py` file in the utils directory creates a `results\` directory (if it doesn't exist yet), and creates a `{agent_name}_performance.png` file with a plot of smoothed rewards over environment steps.
 
 ## How to use the plot.py file
 
 1. Basic usage:
 
     ``` python
-    python utils/plot.py --results results/{agent_name}_results.json
+    python .\utils\plot.py --algorithm {algorithm_name}
     ```
 
-2. With custom window size:
-
-    ``` python
-    python utils/plot.py --results results/{agent_name}_results.json --window 100
-    ```

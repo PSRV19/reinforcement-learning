@@ -1,95 +1,96 @@
 import json
-import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 import argparse
 
-# Set the style for better visualization
-sns.set_style("whitegrid")
-plt.rcParams['figure.figsize'] = (12, 8)
-plt.rcParams['font.size'] = 12
-
-def moving_average(data, window_size):
-    """Compute the moving average using a sliding window."""
-    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
-
-
-def plot_learning_curves(results_path, window_size=50):
+def plot_results(results_file: str, algorithm_name: str):
     """
-    Plot learning curves from a results JSON file.
+    Plot the results from a reinforcement learning algorithm.
     
     Args:
-        results_path (str): Path to the results JSON file
-        window_size (int): Size of the moving average window
+        results_file (str): Path to the JSON results file
+        algorithm_name (str): Name of the algorithm (e.g., 'reinforce', 'a2c', 'ac')
     """
+    # Set seaborn style for better aesthetics
+    sns.set_theme(style="whitegrid")
+    plt.rcParams['figure.figsize'] = [12, 8]
+
     # Load the results
-    with open(results_path, 'r') as f:
+    with open(results_file, "r") as f:
         results = json.load(f)
-    
+
     # Extract data
-    num_episodes = results['num_episodes']
-    num_runs = results['num_runs']
-    runs = results['runs']
-    
+    step_checkpoints_per_run = results["step_checkpoints_per_run"]
+    smoothed_rewards_per_run = results["smoothed_rewards_per_run"]
+    num_runs = results["num_runs"]
+
     # Create figure and axis
-    fig, ax = plt.subplots()
-    
-    # Plot each run with moving average
-    all_returns = []
-    
-    # Create color palette for runs
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Create a color palette for the runs
     colors = sns.color_palette("husl", num_runs)
-    
-    for i, run in enumerate(runs):
-        returns = run['episode_returns']
-        # Apply moving average to raw returns
-        smoothed_returns = moving_average(returns, window_size)
-        all_returns.append(smoothed_returns)
-        ax.plot(range(window_size, num_episodes + 1), smoothed_returns, 
-                alpha=0.3, color=colors[i], label=f'Run {i+1}')
-    
-    # Calculate and plot the average with moving average
-    all_returns = np.array(all_returns)
-    avg_returns = np.mean(all_returns, axis=0)
-    ax.plot(range(window_size, num_episodes + 1), avg_returns, 
-            linewidth=3, color='black', label='Average')
-    
-    # Get algorithm name from file name
-    algo_name = os.path.splitext(os.path.basename(results_path))[0].replace('_results', '').upper()
-    
-    # Add labels and title
-    ax.set_xlabel('Episode')
-    ax.set_ylabel(f'Return ({window_size}-episode moving average)')
-    ax.set_title(f'{algo_name} Learning Curves')
-    
-    # Add legend
-    ax.legend()
-    
-    # Create plots directory if it doesn't exist
-    plots_dir = os.path.join(os.path.dirname(results_path), 'plots')
-    os.makedirs(plots_dir, exist_ok=True)
-    
+
+    # Plot each run with a different color
+    for run in range(num_runs):
+        steps = step_checkpoints_per_run[run]
+        rewards = smoothed_rewards_per_run[run]
+        ax.plot(steps, rewards, alpha=0.7, linewidth=1.5, color=colors[run], label=f'Run {run+1}')
+
+    # Calculate and plot the average line
+    max_steps = max([max(steps) for steps in step_checkpoints_per_run])
+    step_interval = 10000  # Show steps in increments of 10,000
+    all_steps = np.arange(0, max_steps + step_interval, step_interval)
+
+    # Interpolate rewards for each run to common step points
+    interpolated_rewards = []
+    for run in range(num_runs):
+        steps = step_checkpoints_per_run[run]
+        rewards = smoothed_rewards_per_run[run]
+        interpolated = np.interp(all_steps, steps, rewards)
+        interpolated_rewards.append(interpolated)
+
+    # Calculate mean
+    mean_rewards = np.mean(interpolated_rewards, axis=0)
+
+    # Plot mean line
+    ax.plot(all_steps, mean_rewards, linewidth=3, color='black', linestyle='--', label='Average')
+
+    # Customize the plot
+    ax.set_xlabel('Environment Steps', fontsize=12)
+    ax.set_ylabel('Smoothed Episode Reward', fontsize=12)
+    ax.set_title(f'{algorithm_name.upper()} Performance on CartPole-v1', fontsize=14)
+    ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # Format x-axis to show steps in thousands
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x/1000)}k'))
+
+    # Ensure the results directory exists
+    Path("results").mkdir(exist_ok=True)
+
     # Save the plot
-    plot_name = os.path.splitext(os.path.basename(results_path))[0] + '_learning_curves.png'
-    plt.savefig(os.path.join(plots_dir, plot_name), dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"Plot saved to: {os.path.join(plots_dir, plot_name)}")
+    output_file = f"results/{algorithm_name}_performance.png"
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Plot saved to {output_file}")
 
 def main():
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Plot learning curves from reinforcement learning results')
-    parser.add_argument('--results', type=str, required=True,
-                      help='Path to the results JSON file')
-    parser.add_argument('--window', type=int, default=50,
-                      help='Size of the moving average window (default: 50)')
+    parser = argparse.ArgumentParser(description='Plot reinforcement learning results')
+    parser.add_argument('--algorithm', type=str, required=True,
+                      help='Name of the algorithm (e.g., reinforce, a2c, ac)')
+    parser.add_argument('--results', type=str, default=None,
+                      help='Path to results JSON file (default: results/{algorithm}_results.json)')
     
-    # Parse arguments
     args = parser.parse_args()
     
+    # Set default results file path if not provided
+    if args.results is None:
+        args.results = f"results/{args.algorithm}_results.json"
+    
     # Plot the results
-    plot_learning_curves(args.results, args.window)
+    plot_results(args.results, args.algorithm)
 
 if __name__ == "__main__":
-    main()
+    main() 
