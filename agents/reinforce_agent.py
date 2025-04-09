@@ -68,7 +68,12 @@ class ReinforceAgent:
         return returns
     
     def update_policy(self, states, actions, returns):
-        # Convert the states, actions, and returns to tensors
+        # Convert lists to numpy arrays before creating tensors
+        states = np.array(states, dtype=np.float32)
+        actions = np.array(actions, dtype=np.int64)
+        returns = np.array(returns, dtype=np.float32)
+        
+        # Convert to tensors
         states = torch.tensor(states, dtype=torch.float32).to(self.device)
         actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
         returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
