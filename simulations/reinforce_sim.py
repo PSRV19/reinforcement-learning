@@ -22,7 +22,7 @@ learning_rate = config["learning_rate"]
 discount_factor = config["gamma"]
 hidden_size = config["hidden_size"]
 num_runs = config["num_runs"]
-total_steps = 1_000_000  # Total environment steps to run
+total_steps = config["total_steps"]  # Total environment steps to run
 
 # Seed
 RANDOM_SEED = config["seed"]
