@@ -2,6 +2,7 @@ import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 from config import ac_config
 
 # Actor network: maps state to a distribution over actions
@@ -78,6 +79,11 @@ class ACAgent:
         return returns
 
     def update_policy(self, states, actions, log_probs, returns):
+        # Convert lists to numpy arrays
+        states = np.array(states, dtype=np.float32)
+        actions = np.array(actions, dtype=np.int64)
+        returns = np.array(returns, dtype=np.float32)
+
         # Convert lists to tensors
         states = torch.tensor(states, dtype=torch.float32).to(self.device)
         returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
