@@ -109,7 +109,8 @@ for run in run_progress:
         
         # Compute Monte Carlo returns for the episode and update the AC agent
         returns = agent.compute_returns(rewards)
-        agent.update_policy(states, actions, log_probs, returns)
+        # agent.update_policy(states, actions, log_probs, returns)
+        agent.update_with_mc(states, actions, log_probs, rewards)
         
         all_rewards.append(episode_reward)
     

@@ -14,7 +14,7 @@ Ensure that you are in the `\reinforcement-learning` (root) directory. Simply ru
 python simulations/{agent_name}_sim.py
 ```
 
-file for the desired agent and the results will be saved in `\results\` directory.
+File for the desired agent and the results will be saved in `\results\` directory.
 
 Running the `plot.py` file in the utils directory creates a `results\` directory (if it doesn't exist yet), and creates a `{agent_name}_performance.png` file with a plot of smoothed rewards over environment steps.
 
