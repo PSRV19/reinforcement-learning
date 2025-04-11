@@ -8,15 +8,15 @@ import torch.optim as optim
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super(PolicyNetwork, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim),
-            nn.Softmax(dim=1)
-        )
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, action_dim)
     
     def forward(self, state):
-        return self.fc(state)
+        x = self.fc1(state)   
+        x = torch.relu(x)       
+        x = self.fc2(x)          
+        x = torch.softmax(x, dim=1)  # Convert to action probabilities
+        return x
 
 class ReinforceAgent:
     def __init__(
@@ -49,11 +49,8 @@ class ReinforceAgent:
         # Pass the state through the policy network to get the action probabilities
         action_probs = self.policy_network(state)
         
-        # Create a categorical distribution over the action probabilities
-        distribution = torch.distributions.Categorical(action_probs)
-        
-        # Sample an action from the distribution
-        action = distribution.sample().item()
+        # Sample an action
+        action = torch.multinomial(action_probs, 1).item()
 
         return action
     
@@ -78,17 +75,17 @@ class ReinforceAgent:
         actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
         returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
         
-        # Compute the log-probabilities of the taken actions
+        # Compute the probabilities of the taken actions
         action_probs = self.policy_network(states)
         
-        # Create a categorical distribution over the action probabilities
-        distribution = torch.distributions.Categorical(action_probs)
+        # Calculate the log of the action probability distribution
+        log_probs = torch.log(action_probs.gather(1, actions.unsqueeze(1)))
         
-        # Compute the log-probabilities of the taken actions
-        log_probs = distribution.log_prob(actions)
+        # Calculate the loss by multiplying the log probabilities by the returns of the corresponding episode
+        loss = -(log_probs.squeeze() * returns)
         
-        # Compute the policy gradient
-        policy_gradient = -torch.mean(log_probs * returns)
+        # Average it out to get the expected value of the gradient
+        policy_gradient = torch.mean(loss)
         
         # Update the policy network
         self.optimizer.zero_grad()

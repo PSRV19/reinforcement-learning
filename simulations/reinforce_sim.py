@@ -30,11 +30,6 @@ RANDOM_SEED = config["seed"]
 # Create progress bar for runs
 run_progress = tqdm.tqdm(range(num_runs), desc="Runs", position=0)
 
-# Initialize lists to store rewards for each run
-all_rewards_per_run = []
-smoothed_rewards_per_run = []
-step_checkpoints_per_run = []
-
 for run in run_progress:
     run_progress.set_description(f"Run {run + 1}/{num_runs}")
     
@@ -68,9 +63,9 @@ for run in run_progress:
     checkpoint_interval = 1000
     next_checkpoint = checkpoint_interval
 
-    # Create progress bar for steps
-    step_progress = tqdm.tqdm(total=total_steps, desc="Steps", position=1, leave=False)
-    
+    # Create progress bar for episodes
+    episode_progress = tqdm.tqdm(total=total_steps, desc="Episode Steps", position=1, leave=False)
+
     while total_env_steps < total_steps:
         state, info = env.reset()
         states, actions, rewards = [], [], []
@@ -93,7 +88,7 @@ for run in run_progress:
                 
             # Increase nr of environment steps
             total_env_steps += 1
-            step_progress.update(1)
+            episode_progress.update(1)
             
             # If we've passed the next checkpoint, record the average reward
             if total_env_steps >= next_checkpoint:
@@ -118,34 +113,19 @@ for run in run_progress:
         
         # Save the total reward of this episode
         all_rewards.append(sum(rewards))
-    
-    # Close the step progress bar at the end of each run
-    step_progress.close()
-    
-    # Store the rewards for this run
-    all_rewards_per_run.append(all_rewards)
-    smoothed_rewards_per_run.append(smoothed_rewards)
-    step_checkpoints_per_run.append(step_checkpoints)
+        
+    episode_progress.close()
+        
+import matplotlib.pyplot as plt
 
-# Save results to JSON file
-results = {
-    "step_checkpoints_per_run": step_checkpoints_per_run,
-    "smoothed_rewards_per_run": smoothed_rewards_per_run,
-    "all_rewards_per_run": all_rewards_per_run,
-    "total_steps": total_steps,
-    "num_runs": num_runs,
-    "learning_rate": learning_rate,
-    "discount_factor": discount_factor,
-    "hidden_size": hidden_size
-}
-
-# Create results directory if it doesn't exist
-os.makedirs("results", exist_ok=True)
-
-# Save to JSON file
-with open("results/reinforce_results.json", "w") as f:
-    json.dump(results, f, indent=4)
-
-print("\nResults saved to results/reinforce_results.json")
+plt.figure(figsize=(10, 6))
+plt.plot(step_checkpoints, smoothed_rewards, label="Smoothed Reward (50-episode MA)")
+plt.xlabel("Environment Steps")
+plt.ylabel("Episode Reward (Moving Avg)")
+plt.title("REINFORCE on CartPole-v1")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 
