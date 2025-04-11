@@ -1,15 +1,16 @@
 import gymnasium as gym
 import numpy as np
 import sys
+import torch
+import tqdm
+import random
 import os
+import json
+
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.reinforce_agent import ReinforceAgent
 from config.reinforce_config import config
-import torch
-import tqdm
-import random
-import json
 
 # Set up device in case there is a GPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,6 +27,11 @@ total_steps = config["total_steps"]  # Total environment steps to run
 
 # Seed
 RANDOM_SEED = config["seed"]
+
+# Store results across runs for plotting purposes
+all_step_checkpoints = []
+all_smoothed_rewards = []
+all_rewards_per_run = []
 
 # Create progress bar for runs
 run_progress = tqdm.tqdm(range(num_runs), desc="Runs", position=0)
@@ -53,10 +59,8 @@ for run in run_progress:
         device = device
     )
     
-    # Initialize counters
+    # Initialize counters and lists
     total_env_steps = 0
-    
-    # To track rewards over time
     all_rewards = []
     smoothed_rewards = []
     step_checkpoints = []
@@ -115,17 +119,28 @@ for run in run_progress:
         all_rewards.append(sum(rewards))
         
     episode_progress.close()
+    
+    # Store results for this run
+    all_step_checkpoints.append(step_checkpoints)
+    all_smoothed_rewards.append(smoothed_rewards)
+    all_rewards_per_run.append(all_rewards)
         
-import matplotlib.pyplot as plt
+# Save all results to JSON
+results = {
+    "step_checkpoints_per_run": all_step_checkpoints,
+    "smoothed_rewards_per_run": all_smoothed_rewards,
+    "all_rewards_per_run": all_rewards_per_run,
+    "total_steps": total_steps,
+    "num_runs": num_runs,
+    "learning_rate": learning_rate,
+    "discount_factor": discount_factor,
+    "hidden_size": hidden_size
+}
 
-plt.figure(figsize=(10, 6))
-plt.plot(step_checkpoints, smoothed_rewards, label="Smoothed Reward (50-episode MA)")
-plt.xlabel("Environment Steps")
-plt.ylabel("Episode Reward (Moving Avg)")
-plt.title("REINFORCE on CartPole-v1")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.show()
+os.makedirs("results", exist_ok=True)
+with open("results/reinforce_results.json", "w") as f:
+    json.dump(results, f, indent=4)
+
+print("\nResults saved to results/reinforce_results.json")
 
 
