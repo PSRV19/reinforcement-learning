@@ -11,7 +11,7 @@ def plot_results(results_file: str, algorithm_name: str):
     
     Args:
         results_file (str): Path to the JSON results file
-        algorithm_name (str): Name of the algorithm (e.g., 'reinforce', 'a2c', 'ac')
+        algorithm_name (str): Name of the algorithm (e.g., 'reinforce', 'a2c', 'ac', 'ppo')
     """
     # Set seaborn style for better aesthetics
     sns.set_theme(style="whitegrid")
