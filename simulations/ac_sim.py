@@ -77,11 +77,12 @@ for run in run_progress:
         actions  = []
         rewards  = []
         log_probs = []
+        values = []
         
         # Run one episode until termination (or until total steps reached)
         while not done and total_env_steps < total_steps:
             # Select an action using the AC agent
-            action, log_prob = agent.select_action(state)
+            action, log_prob, value = agent.select_action(state)
             
             # Execute action in the environment
             next_state, reward, terminated, truncated, info = env.step(action)
@@ -92,6 +93,7 @@ for run in run_progress:
             actions.append(action)
             rewards.append(reward)
             log_probs.append(log_prob)
+            values.append(value)
             
             episode_reward += reward
             total_env_steps += 1
@@ -109,8 +111,7 @@ for run in run_progress:
         
         # Compute Monte Carlo returns for the episode and update the AC agent
         returns = agent.compute_returns(rewards)
-        # agent.update_policy(states, actions, log_probs, returns)
-        agent.update_with_mc(states, actions, log_probs, rewards)
+        agent.update_policy(states, log_probs, values, returns)
         
         all_rewards.append(episode_reward)
     

@@ -1,35 +1,47 @@
+import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 
-class ActorNetwork(nn.Module):
+# Define the policy network (Actor)
+class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
-        super(ActorNetwork, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim),
-            nn.Softmax(dim=1)
-        )
-        
+        super(PolicyNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, action_dim)
+    
     def forward(self, state):
-        return self.fc(state)
+        x = self.fc1(state)
+        x = torch.relu(x)
+        x = self.fc2(x)
+        x = torch.softmax(x, dim=1)  # Convert to action probabilities
+        return x
 
-class CriticNetwork(nn.Module):
+# Define the value network (Critic)
+class ValueNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim):
-        super(CriticNetwork, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)  # Outputs the state value
-        )
-        
+        super(ValueNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)  # Outputs a single value (V(s))
+    
     def forward(self, state):
-        return self.fc(state)
+        x = self.fc1(state)
+        x = torch.relu(x)
+        x = self.fc2(x)
+        return x
 
 class ACAgent:
-    def __init__(self, env, state_size, hidden_size, action_size, learning_rate, discount_factor, device=None):
+    def __init__(
+        self,
+        env: gym.Env,
+        state_size: int,
+        hidden_size: int,
+        action_size: int,
+        learning_rate: float,
+        discount_factor: float,
+        device=None
+    ):
         self.env = env
         self.state_size = state_size
         self.hidden_size = hidden_size
@@ -38,76 +50,67 @@ class ACAgent:
         self.gamma = discount_factor
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Define separate networks for actor and critic
-        self.actor = ActorNetwork(self.state_size, self.hidden_size, self.action_size).to(self.device)
-        self.critic = CriticNetwork(self.state_size, self.hidden_size).to(self.device)
+        # Create the actor (policy network) and critic (value network)
+        self.policy_network = PolicyNetwork(self.state_size, self.hidden_size, self.action_size).to(self.device)
+        self.value_network = ValueNetwork(self.state_size, self.hidden_size).to(self.device)
         
-        # Optimizers for actor and critic
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
-
+        # Separate optimizers for actor and critic
+        self.actor_optimizer = optim.Adam(self.policy_network.parameters(), lr=self.lr)
+        self.critic_optimizer = optim.Adam(self.value_network.parameters(), lr=self.lr)
+    
     def select_action(self, state):
-        # Convert state to tensor and add batch dimension
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-        # Get action probabilities from actor network
-        action_probs = self.actor(state_tensor)
-        # Create a categorical distribution and sample an action
-        dist = torch.distributions.Categorical(action_probs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-        return action.item(), log_prob
-
+        # Convert the state to a tensor
+        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        
+        # Pass the state through the policy network to get the action probabilities
+        action_probs = self.policy_network(state)
+        
+        # Sample an action
+        action = torch.multinomial(action_probs, 1).item()
+        
+        # Get the log probability of the selected action
+        log_prob = torch.log(action_probs.squeeze(0)[action])
+        
+        # Get the value of the current state from the critic
+        value = self.value_network(state)
+        
+        return action, log_prob, value
+    
     def compute_returns(self, rewards):
-        # Compute full-episode Monte Carlo returns
         returns = []
-        G = 0
+        G_t = 0
+        
         for reward in reversed(rewards):
-            G = reward + self.gamma * G
-            returns.insert(0, G)
+            G_t = reward + self.gamma * G_t
+            returns.insert(0, G_t)
+        
         return returns
-
-    def update_policy(self, states, actions, log_probs, returns):
+    
+    def update_policy(self, states, log_probs, values, returns):
+        # Convert lists to numpy arrays before creating tensors
         states = np.array(states, dtype=np.float32)
-
-        # Convert states list and returns list to tensors
-        states_tensor = torch.tensor(states, dtype=torch.float32).to(self.device)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
-        # Obtain the critic's value estimates for the states
-        values = self.critic(states_tensor).squeeze()
+        returns = np.array(returns, dtype=np.float32)
         
-        # Actor loss: using full Monte Carlo returns (without subtracting a baseline)
-        actor_loss = torch.mean(torch.stack(log_probs) * returns_tensor)
-        # Critic loss: Mean Squared Error between returns and predicted state values
-        critic_loss = torch.mean((returns_tensor - values) ** 2)
+        # Convert to tensors
+        states = torch.tensor(states, dtype=torch.float32).to(self.device)
+        returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
+        values = torch.cat(values).squeeze().to(self.device)
         
-        total_loss = actor_loss - critic_loss
+        # Compute the advantage (returns - values)
+        advantages = returns - values
         
-        # Perform gradient descent steps for both actor and critic
+        # Actor loss: use the advantage to scale the log probabilities
+        actor_loss = -torch.mean(torch.stack(log_probs) * advantages.detach())
+        
+        # Critic loss: minimize the squared error between returns and predicted values
+        critic_loss = torch.mean((returns - values) ** 2)
+        
+        # Update the actor network
         self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
-        total_loss.backward()
+        actor_loss.backward()
         self.actor_optimizer.step()
-        self.critic_optimizer.step()
-
-    def update_with_mc(self, states, actions, log_probs, rewards):
-        # Compute Monte Carlo returns
-        returns = self.compute_returns(rewards)
-        returns_tensor = torch.tensor(returns, dtype=torch.float32).to(self.device)
-        # Convert states to tensor
-        states = np.array(states, dtype=np.float32)
-        states_tensor = torch.tensor(states, dtype=torch.float32).to(self.device)
-        # Get critic's value estimates
-        values = self.critic(states_tensor).squeeze()
         
-        # Actor loss: without advantage, using full Monte Carlo returns
-        actor_loss = torch.mean(torch.stack(log_probs) * returns_tensor.detach())
-        # Critic loss: minimize the squared error between returns and values
-        critic_loss = torch.mean((returns_tensor - values) ** 2)
-        # Total loss
-        total_loss = actor_loss - critic_loss
-        # Update actor and critic
-        self.actor_optimizer.zero_grad()
+        # Update the critic network
         self.critic_optimizer.zero_grad()
-        total_loss.backward()
-        self.actor_optimizer.step()
+        critic_loss.backward()
         self.critic_optimizer.step()
