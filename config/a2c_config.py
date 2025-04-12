@@ -4,5 +4,6 @@ config = {
     "gamma": 0.99,
     "total_steps" : 1_000_000,
     "num_runs": 5,
+    "rollout_length": 5,
     "seed": 42
 }

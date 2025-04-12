@@ -1,35 +1,35 @@
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 
-# Actor network: maps state to a probability distribution over actions.
-class ActorNetwork(nn.Module):
+# Define the policy network (Actor)
+class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
-        super(ActorNetwork, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim),
-            nn.Softmax(dim=1)
-        )
-        
+        super(PolicyNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, action_dim)
+    
     def forward(self, state):
-        return self.fc(state)
+        x = self.fc1(state)
+        x = torch.relu(x)
+        x = self.fc2(x)
+        action_probs = torch.softmax(x, dim=1)
+        return action_probs
 
-# Critic network: approximates the state value function V(s).
-class CriticNetwork(nn.Module):
+# Define the value network (Critic)
+class ValueNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim):
-        super(CriticNetwork, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
+        super(ValueNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)  # Single output for state value
         
     def forward(self, state):
-        return self.fc(state)
+        x = self.fc1(state)
+        x = torch.relu(x)
+        value = self.fc2(x)
+        return value
 
 class A2CAgent:
     def __init__(
@@ -40,7 +40,10 @@ class A2CAgent:
         action_size: int,
         learning_rate: float,
         discount_factor: float,
-        device=None
+        entropy_coef: float = 0.01,
+        value_loss_coef: float = 0.5,
+        device=None,
+        rollout_length: int = 5  # Number of steps per rollout
     ):
         self.env = env
         self.state_size = state_size
@@ -48,47 +51,77 @@ class A2CAgent:
         self.action_size = action_size
         self.lr = learning_rate
         self.gamma = discount_factor
+        self.entropy_coef = entropy_coef
+        self.value_loss_coef = value_loss_coef
+        self.rollout_length = rollout_length
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Use separate networks for actor and critic
-        self.actor = ActorNetwork(self.state_size, self.hidden_size, self.action_size).to(self.device)
-        self.critic = CriticNetwork(self.state_size, self.hidden_size).to(self.device)
+        # Create actor and critic networks
+        self.policy_network = PolicyNetwork(self.state_size, self.hidden_size, self.action_size).to(self.device)
+        self.value_network = ValueNetwork(self.state_size, self.hidden_size).to(self.device)
         
-        # Separate optimizers for actor and critic networks
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr)
-
+        # Separate optimizers for actor and critic
+        self.actor_optimizer = optim.Adam(self.policy_network.parameters(), lr=self.lr)
+        self.critic_optimizer = optim.Adam(self.value_network.parameters(), lr=self.lr)
+    
     def select_action(self, state):
-        # Convert state to tensor and get actor probabilities and critic value
+        # Convert state to tensor and pass it through the networks
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-        action_probs = self.actor(state_tensor)
-        distribution = torch.distributions.Categorical(action_probs)
-        action = distribution.sample()
-        log_prob = distribution.log_prob(action)
-        value = self.critic(state_tensor)
-        return action.item(), log_prob, value
-
-    def update(self, state, reward, next_state, done, log_prob, value):
-        # Convert next_state to tensor
-        # state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-        next_state = np.array(next_state, dtype=np.float32)
-        next_state_tensor = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        action_probs = self.policy_network(state_tensor)
         
-        with torch.no_grad():
-            # If the episode has terminated, next state's value is 0.
-            next_value = self.critic(next_state_tensor) if not done else torch.tensor([[0.0]]).to(self.device)
+        # Build a categorical distribution to sample the action
+        action_dist = torch.distributions.Categorical(action_probs)
+        action = action_dist.sample()
+        log_prob = action_dist.log_prob(action)
+        # Entropy bonus encourages exploration
+        entropy = action_dist.entropy()
+        value = self.value_network(state_tensor)
         
-        # Compute the TD error (advantage)
-        td_error = reward + self.gamma * next_value - value
+        return action.item(), log_prob, value, entropy
+    
+    def compute_bootstrap_returns(self, rewards, next_value, dones):
+        """
+        Compute n-step bootstrapped returns.
+        If a terminal state is reached in a rollout step, the bootstrap value is reset to 0.
+        """
+        R = next_value
+        returns = []
+        # Iterate backward over rewards and done flags
+        for reward, done in zip(reversed(rewards), reversed(dones)):
+            if done:
+                R = 0  # no bootstrapping if episode terminated
+            R = reward + self.gamma * R
+            returns.insert(0, R)
+        return returns
+    
+    def update_policy(self, states, actions, log_probs, values, entropies, rewards, dones, next_value):
+        """
+        Update policy using the collected rollout.  
+        Uses the bootstrapped n-step returns, computes the advantage,
+        and then updates both actor and critic networks.
+        """
+        # Convert buffers into tensors
+        states = torch.tensor(np.array(states), dtype=torch.float32).to(self.device)
+        log_probs = torch.stack(log_probs)
+        values = torch.cat(values).squeeze()
+        entropies = torch.stack(entropies)
         
-        # Actor loss: using the TD error as an advantage, detach td_error for actor update stability.
-        actor_loss = -log_prob * td_error.detach()
-        # Critic loss: minimize the squared TD error.
-        critic_loss = td_error.pow(2)
+        # Compute bootstrapped returns
+        returns = self.compute_bootstrap_returns(rewards, next_value, dones)
+        returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
+        
+        # Advantage as the difference between returns and baseline value estimates
+        advantages = returns - values
+        
+        # Actor loss includes an entropy bonus for exploration
+        actor_loss = - (log_probs * advantages.detach()).mean() - self.entropy_coef * entropies.mean()
+        
+        # Critic loss (mean squared error) scales using a coefficient
+        critic_loss = self.value_loss_coef * (advantages ** 2).mean()
         
         # Update actor network
         self.actor_optimizer.zero_grad()
-        actor_loss.backward(retain_graph=True)
+        actor_loss.backward()
         self.actor_optimizer.step()
         
         # Update critic network

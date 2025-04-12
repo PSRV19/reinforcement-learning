@@ -18,108 +18,138 @@ print(f"Using device: {device}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-# Hyperparameters and simulation settings
+# Hyperparameters and settings from config, plus total steps for simulation
 learning_rate   = config["learning_rate"]
 discount_factor = config["gamma"]
 hidden_size     = config["hidden_size"]
 num_runs        = config["num_runs"]
-total_steps     = config["total_steps"]  # Total environment steps to run in each run
+total_steps     = config["total_steps"]  # Total environment steps to run
 RANDOM_SEED     = config["seed"]
+rollout_length  = config.get("rollout_length", 5)  # New parameter: rollout length
 
 # Lists to store results from each run
-all_rewards_per_run       = []  # Raw reward per episode for each run
-smoothed_rewards_per_run  = []  # Smoothed (moving average) rewards sampled at checkpoints
-step_checkpoints_per_run  = []  # Environment step counts at the checkpoints
+all_rewards_per_run     = []  # Per-episode returns per run
+smoothed_rewards_per_run = []  # Moving averages of episode returns at checkpoints
+step_checkpoints_per_run = []  # Environment steps at which checkpoints were recorded
 
-# Create a progress bar for runs
+# Progress bar for runs
 run_progress = tqdm.tqdm(range(num_runs), desc="Runs", position=0)
 
 for run in run_progress:
     run_progress.set_description(f"Run {run + 1}/{num_runs}")
     
-    # Set random seed for reproducibility
+    # Set random seeds for reproducibility
     seed = run + RANDOM_SEED
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    # Create the CartPole environment with episode statistics recording
+    # Create the CartPole environment with the RecordEpisodeStatistics wrapper
     env = gym.wrappers.RecordEpisodeStatistics(gym.make("CartPole-v1"))
     
-    # Create the A2C Agent (from a2c_agent.py)
+    # Create the A2C agent
     agent = A2CAgent(
         env=env,
-        state_size=4,      # For CartPole: [position, velocity, pole angle, angular velocity]
+        state_size=4,      # For CartPole: [cart position, cart velocity, pole angle, pole angular velocity]
         hidden_size=hidden_size,
-        action_size=2,     # Two actions: left and right
+        action_size=2,     # Two possible actions: left or right
         learning_rate=learning_rate,
         discount_factor=discount_factor,
-        device=device
+        device=device,
+        rollout_length=rollout_length
     )
     
     total_env_steps = 0
-    all_rewards    = []   # To record the episode reward for this run
-    smoothed_rewards = []  # To store moving-average rewards at checkpoints
-    step_checkpoints = []  # To record the total number of environment steps at checkpoints
-    checkpoint_interval = 1000  # Record performance every 1,000 steps
+    all_rewards = []    # Rewards for each episode during this run
+    smoothed_rewards = []  # Moving averages of episode returns
+    step_checkpoints = []  # Step counts for checkpoints
+    checkpoint_interval = 1000  # Record a checkpoint every 1000 steps
     next_checkpoint = checkpoint_interval
-
-    # Progress bar for environment steps in the current run
-    step_progress = tqdm.tqdm(total=total_steps, desc="Steps", position=1, leave=False)
     
-    # Run episodes until the total environment step count is reached
+    # Buffers for storing transitions in the current rollout
+    rollout_states = []
+    rollout_actions = []
+    rollout_log_probs = []
+    rollout_values = []
+    rollout_entropies = []
+    rollout_rewards = []
+    rollout_dones = []
+    
+    state, info = env.reset()
+    episode_reward = 0
+    progress_bar = tqdm.tqdm(total=total_steps, desc="Steps", position=1, leave=False)
+    
     while total_env_steps < total_steps:
-        state, info = env.reset()
-        episode_reward = 0
-        done = False
-        # Lists to collect data for the episode
-        states = []
-        actions = []
-        rewards = []
-        log_probs = []
+        # Select action using the A2C agent
+        action, log_prob, value, entropy = agent.select_action(state)
         
-        # Run one episode
-        while not done and total_env_steps < total_steps:
-            # A2C agent selects an action; note that select_action returns (action, log_prob, value)
-            action, log_prob, value = agent.select_action(state)
-            next_state, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
+        # Execute the action in the environment
+        next_state, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+        
+        # Store the transition in the rollout buffer
+        rollout_states.append(state)
+        rollout_actions.append(action)
+        rollout_log_probs.append(log_prob)
+        rollout_values.append(value)
+        rollout_entropies.append(entropy)
+        rollout_rewards.append(reward)
+        rollout_dones.append(done)
+        
+        episode_reward += reward
+        total_env_steps += 1
+        progress_bar.update(1)
+        
+        # If the rollout buffer is full or the episode ends, perform an update.
+        if len(rollout_states) >= rollout_length or done:
+            if done:
+                next_value = 0
+            else:
+                next_state_tensor = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).to(device)
+                next_value = agent.value_network(next_state_tensor).item()
+            agent.update_policy(
+                rollout_states,
+                rollout_actions,
+                rollout_log_probs,
+                rollout_values,
+                rollout_entropies,
+                rollout_rewards,
+                rollout_dones,
+                next_value
+            )
             
-            # Store transitions (for computing Monte Carlo returns later)
-            states.append(state)
-            actions.append(action)
-            rewards.append(reward)
-            log_probs.append(log_prob)
-            
-            episode_reward += reward
-            total_env_steps += 1
-            step_progress.update(1)
-            
-            # At checkpoints record the moving average (over the last 50 episodes, if available)
+            # Clear the rollout buffers for the next batch of transitions.
+            rollout_states = []
+            rollout_actions = []
+            rollout_log_probs = []
+            rollout_values = []
+            rollout_entropies = []
+            rollout_rewards = []
+            rollout_dones = []
+        
+        # If the episode finished, record reward data and reset the environment.
+        if done:
+            all_rewards.append(episode_reward)
+            # Record a checkpoint if appropriate.
             if total_env_steps >= next_checkpoint:
                 recent_rewards = all_rewards[-50:] if len(all_rewards) >= 50 else all_rewards
                 avg_reward = np.mean(recent_rewards) if recent_rewards else 0
                 smoothed_rewards.append(avg_reward)
                 step_checkpoints.append(total_env_steps)
                 next_checkpoint += checkpoint_interval
-                
+            state, info = env.reset()
+            episode_reward = 0
+        else:
             state = next_state
-        
-        # After the episode, compute MC returns and update the agent
-        returns = agent.compute_returns(rewards)
-        agent.update_policy(states, actions, log_probs, returns)
-        
-        all_rewards.append(episode_reward)
     
-    step_progress.close()
-    
+    progress_bar.close()
     all_rewards_per_run.append(all_rewards)
     smoothed_rewards_per_run.append(smoothed_rewards)
     step_checkpoints_per_run.append(step_checkpoints)
     
     run_progress.set_description(f"Run {run + 1}/{num_runs} completed")
 
-# Save the results with metadata to JSON file
+# Save results and configuration metadata into a JSON file
 results = {
     "step_checkpoints_per_run": step_checkpoints_per_run,
     "smoothed_rewards_per_run": smoothed_rewards_per_run,
@@ -128,7 +158,8 @@ results = {
     "num_runs": num_runs,
     "learning_rate": learning_rate,
     "discount_factor": discount_factor,
-    "hidden_size": hidden_size
+    "hidden_size": hidden_size,
+    "rollout_length": rollout_length
 }
 
 os.makedirs("results", exist_ok=True)
