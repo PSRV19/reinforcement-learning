@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# Define the policy network (Actor)
+# Policy Network (Actor)
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super(PolicyNetwork, self).__init__()
@@ -18,7 +18,7 @@ class PolicyNetwork(nn.Module):
         x = torch.softmax(x, dim=1)  # Convert to action probabilities
         return x
 
-# Define the value network (Critic)
+# Value Network (Critic)
 class ValueNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super(ValueNetwork, self).__init__()
@@ -59,58 +59,53 @@ class ACAgent:
         self.critic_optimizer = optim.Adam(self.value_network.parameters(), lr=self.lr)
     
     def select_action(self, state):
-        # Convert the state to a tensor
+        # Convert the state to a tensor and add a batch dimension
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         
-        # Pass the state through the policy network to get the action probabilities
+        # Pass the state through the policy network to get action probabilities
         action_probs = self.policy_network(state)
         
-        # Sample an action
+        # Sample an action from the probability distribution
         action = torch.multinomial(action_probs, 1).item()
         
         # Get the log probability of the selected action
         log_prob = torch.log(action_probs.squeeze(0)[action])
         
-        # Get the value of the current state from the critic
+        # Get the value estimate for the current state
         value = self.value_network(state)
         
         return action, log_prob, value
-    
+
     def compute_returns(self, rewards):
         returns = []
         G_t = 0
-        
         for reward in reversed(rewards):
             G_t = reward + self.gamma * G_t
             returns.insert(0, G_t)
-        
         return returns
-    
-    def update_policy(self, states, log_probs, values, returns):
+
+    def update_policy(self, states, log_probs, returns):
         # Convert lists to numpy arrays before creating tensors
         states = np.array(states, dtype=np.float32)
         returns = np.array(returns, dtype=np.float32)
         
-        # Convert to tensors
+        # Create tensors
         states = torch.tensor(states, dtype=torch.float32).to(self.device)
         returns = torch.tensor(returns, dtype=torch.float32).to(self.device)
-        values = torch.cat(values).squeeze().to(self.device)
         
-        # Compute the advantage (returns - values)
-        advantages = returns - values
+        # Actor loss: use returns directly (vanilla AC update)
+        actor_loss = -torch.mean(torch.stack(log_probs) * returns)
         
-        # Actor loss: use the advantage to scale the log probabilities
-        actor_loss = -torch.mean(torch.stack(log_probs) * advantages.detach())
-        
-        # Critic loss: minimize the squared error between returns and predicted values
+        # Critic update: predict values for all states and compute the MSE loss with the returns
+        values = self.value_network(states).squeeze()
         critic_loss = torch.mean((returns - values) ** 2)
         
-        # Update the actor network
+        # Update actor network
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
         
-        # Update the critic network
+        # Update critic network
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
