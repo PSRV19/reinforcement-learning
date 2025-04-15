@@ -5,6 +5,7 @@ In this repo we have the following agents:
 - REINFORCE
 - AC
 - A2C
+- A2C with entropy
 
 ## How to run simulations
 
