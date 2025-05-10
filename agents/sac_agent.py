@@ -74,7 +74,7 @@ class DiscreteSACAgent:
         self.buffer_size = buffer_size
         self.buffer = ReplayBuffer(capacity=buffer_size)
         self.tau = tau
-        self.target_entropy = target_entropy * np.log(action_size)
+        self.target_entropy = -1 * target_entropy * np.log(action_size)
         self.device = device or torch.device("cpu")#"cuda" if torch.cuda.is_available() else "cpu")
 
         # Initialize adaptive temperature tuning
